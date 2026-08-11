@@ -1,0 +1,25 @@
+[project]
+name = "postprocessing-visualizer"
+version = "0.1.0"
+description = "Minimal GUI for simulation field visualization and export."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [
+  { name = "Clara Choukroun" }
+]
+dependencies = [
+  "matplotlib>=3.8",
+  "numpy>=1.26",
+  "Pillow>=10.0",
+]
+
+[project.scripts]
+postprocessing-visualizer = "visualizer.app:main"
+
+[tool.setuptools.packages.find]
+include = ["visualizer*", "geometry*"]
+
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
