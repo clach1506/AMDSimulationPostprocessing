@@ -13,7 +13,7 @@ stray extra windows and piled-up colorbars behind on every frame change.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import List, Optional, Sequence, Tuple
+from typing import Optional, Sequence, Tuple
 
 import matplotlib
 import matplotlib.animation as animation
