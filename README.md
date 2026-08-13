@@ -21,7 +21,30 @@ To launch the interface :
 python3.13 SimulationPostprocessing.py [sim_dir]
 ```
 
-## Layout
+## Features
+
+### Visualizer tab
+- Load a simulation folder; pick a field, colormap, step range and stride.
+- Live preview with a frame slider
+- TO ZOOM on a specific area (bridges per example) : Draw a rectangle directly on the preview to define a zoom subwindow, then
+  optionally crop the preview
+- Optionally load a segmentation folder to preview its own contour evolution
+  side by side with the simulation
+- Exports (all zoom-aware): animated GIF, a contour-evolution overlay (every
+  selected step's boundary on one plot, colored by step), and a velocity
+  snapshot grid (quiver + speed heatmap, one panel per step)
+
+### Region Matching tab
+- For every image in the loaded segmentation folder, finds the simulation
+  step whose field best matches it by using Dice coefficient
+- Sources IR images and a `dates.csv` (acquisition dates -> days since the first
+  frame) are both optional extras, not required to run matching
+- Preview as either the matched boundary overlaid on the source photo, or a
+  spatial-agreement map 
+- Exports: per-frame or gif overlays, and a multi-panel overlap figure all written to a single `visualization/` folder
+  at the root of the series (next to `segmentations/`, `sources/`, etc.)
+
+  ## Layout
 
 - `SimulationPostprocessing.py` — GUI launcher entry point.
 - `match_segmentation.py` : find the simulation step(s) that best match
@@ -46,28 +69,5 @@ python3.13 SimulationPostprocessing.py [sim_dir]
     behavior, mixed into `VisualizerApp`.
   - `gui_style.py` / `gui_widgets.py` — the shared ttk theme and small
     reusable composite widgets (step range + zoom controls).
-- `geometry/` — CSF1 grid/field file format I/O (`read_grid`,
+- `geometry/` — grid/field file format I/O (`read_grid`,
   `read_field_compact`), used by `visualizer/data.py`.
-
-## Features
-
-### Visualizer tab
-- Load a simulation folder; pick a field, colormap, step range and stride.
-- Live preview with a frame slider
-- TO ZOOM on a specific area (bridges per example) : Draw a rectangle directly on the preview to define a zoom subwindow, then
-  optionally crop the preview
-- Optionally load a segmentation folder to preview its own contour evolution
-  side by side with the simulation
-- Exports (all zoom-aware): animated GIF, a contour-evolution overlay (every
-  selected step's boundary on one plot, colored by step), and a velocity
-  snapshot grid (quiver + speed heatmap, one panel per step)
-
-### Region Matching tab
-- For every image in the loaded segmentation folder, finds the simulation
-  step whose field best matches it by using Dice coefficient
-- Sources IR images and a `dates.csv` (acquisition dates -> days since the first
-  frame) are both optional extras, not required to run matching
-- Preview as either the matched boundary overlaid on the source photo, or a
-  spatial-agreement map 
-- Exports: per-frame or gif overlays, and a multi-panel overlap figure all written to a single `visualization/` folder
-  at the root of the series (next to `segmentations/`, `sources/`, etc.)
