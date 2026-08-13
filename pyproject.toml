@@ -1,7 +1,7 @@
 [project]
-name = "postprocessing-visualizer"
+name = "simulation-postprocesser"
 version = "0.1.0"
-description = "Minimal GUI for simulation field visualization and export."
+description = "Minimal GUI for simulation fields visualizations and exports, matching with medical segmentations"
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
@@ -23,5 +23,3 @@ include = ["visualizer*", "geometry*"]
 [build-system]
 requires = ["setuptools>=68.0", "wheel"]
 build-backend = "setuptools.build_meta"
-
-/Users/clarachoukroun/Desktop/results_clara/Epargne_fov/DE_D
