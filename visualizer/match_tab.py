@@ -22,7 +22,6 @@ from .gui_style import PANEL_BG
 from .seg_match import (
     MM_PER_PIXEL,
     FrameMatch,
-    default_output_dir,
     draw_overlap_panel,
     draw_overlay,
     export_overlap_figure,
@@ -149,7 +148,9 @@ class MatchTabMixin:
             return 0.5
 
     def _match_output_dir(self) -> Path:
-        return default_output_dir(self.segmentation.folder)
+        # Shared with the Visualizer tab's exports (see VisualizerTabMixin.
+        # _viz_output_dir) so everything lands in one 'visualization' folder.
+        return self._viz_output_dir()
 
     def _fail_match_export(self, message: str) -> None:
         self.status_var.set(message)

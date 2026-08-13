@@ -8,6 +8,7 @@ it has no opinion about how those arrays get drawn.
 
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -28,12 +29,14 @@ class SimulationData:
     field_root: Path = field(init=False)
     grid: Dict[str, float] = field(init=False)
     fields: Dict[str, List[int]] = field(init=False)
+    metadata: Dict = field(init=False)
 
     def __post_init__(self) -> None:
         self.sim_dir = Path(self.sim_dir)
         self.field_root = self._find_field_root(self.sim_dir)
         self.grid = read_grid(self._find_grid_path(self.sim_dir))
         self.fields = self._discover_fields(self.field_root)
+        self.metadata = self._read_metadata(self.sim_dir, self.field_root)
 
     # -- discovery ---------------------------------------------------------
 
@@ -54,6 +57,21 @@ class SimulationData:
         if candidate.exists():
             return candidate
         raise FileNotFoundError(f"Could not find a simulation field root in {sim_dir}")
+
+    @staticmethod
+    def _read_metadata(sim_dir: Path, field_root: Path) -> Dict:
+        """Optional `metadata.json` (physics/numerics/... written alongside
+        grid.dat by the solver) — used for e.g. `dt`, so exported GIFs can
+        label frames with real simulation time instead of just the raw step
+        index. Silently empty if not present or unreadable, everything that
+        uses it is best-effort."""
+        for candidate in (sim_dir / "metadata.json", field_root / "metadata.json"):
+            if candidate.is_file():
+                try:
+                    return json.loads(candidate.read_text())
+                except (json.JSONDecodeError, OSError):
+                    return {}
+        return {}
 
     @staticmethod
     def _discover_fields(root: Path) -> Dict[str, List[int]]:
@@ -97,6 +115,20 @@ class SimulationData:
 
     def is_vector_field(self, field_name: str) -> bool:
         return field_name in VECTOR_FIELDS
+
+    def dt(self) -> Optional[float]:
+        return self.metadata.get("numerics", {}).get("dt")
+
+    def simulation_time(self, step: int) -> Optional[float]:
+        """Physical simulation time at `step` (step * dt), or None if the
+        solver's metadata.json (or its `dt`) isn't available — callers
+        should fall back to displaying the raw step index in that case."""
+        dt = self.dt()
+        return step * dt if dt is not None else None
+
+    def time_label(self, step: int) -> str:
+        t = self.simulation_time(step)
+        return f"t = {t:.4g}" if t is not None else f"step {step}"
 
     # -- loading ---------------------------------------------------------------
 

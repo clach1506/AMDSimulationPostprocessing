@@ -267,6 +267,12 @@ class Exporter:
                 # matplotlib >=3.8 makes QuadContourSet itself a single Artist;
                 # older versions expose the line segments via .collections.
                 frame_artists.extend(getattr(cs, "collections", [cs]))
+            # Simulation time (step * dt from metadata.json) when known,
+            # else the raw step — as its own text artist so it updates every
+            # frame instead of staying fixed like a plain ax.set_title would.
+            frame_artists.append(ax.text(0.02, 0.98, self.data.time_label(step), transform=ax.transAxes,
+                                          ha="left", va="top", fontsize=10,
+                                          bbox=dict(facecolor="white", alpha=0.75, edgecolor="none", pad=3)))
             artists.append(frame_artists)
         if zoom_box is not None:
             xmin, xmax, ymin, ymax = zoom_box
@@ -368,14 +374,17 @@ class Exporter:
 
     # -- velocity small-multiples grid -----------------------------------------
 
-    def export_velocity_grid(self, steps: Sequence[int], output_path: Path, cmap: Optional[str] = None,
-                              quiver: bool = True, quiver_stride: Optional[int] = None,
-                              zoom_box: Optional[ZoomBox] = None) -> Path:
+    def draw_velocity_grid(self, fig, steps: Sequence[int], cmap: Optional[str] = None,
+                            quiver: bool = True, quiver_stride: Optional[int] = None,
+                            zoom_box: Optional[ZoomBox] = None) -> None:
+        """One velocity panel per selected step, small-multiples style, laid
+        out directly onto `fig` — so it doubles as both the live preview and
+        (via `export_velocity_grid`) the saved figure, the same draw/export
+        split used by `draw_contour_evolution`/`export_contour_evolution`."""
         if not steps:
             raise ValueError("No steps selected")
         ncols = min(6, max(1, len(steps)))
         nrows = -(-len(steps) // ncols)
-        fig = Figure(figsize=(5 * ncols, 4.5 * nrows))
         axes = fig.subplots(nrows, ncols, squeeze=False)
         flat = list(axes.flat)
         for ax in flat[len(steps):]:
@@ -384,11 +393,22 @@ class Exporter:
             values = self.data.load_field("velocity", step)
             FieldRenderer.velocity(ax, self.xs, self.ys, self.x_edges, self.y_edges, values,
                                     cmap=cmap or DEFAULT_VELOCITY_CMAP, quiver=quiver,
-                                    quiver_stride=quiver_stride, title=f"t={step}")
+                                    quiver_stride=quiver_stride, title=self.data.time_label(step))
             if zoom_box is not None:
                 xmin, xmax, ymin, ymax = zoom_box
                 ax.set_xlim(xmin, xmax)
                 ax.set_ylim(ymin, ymax)
+
+    def export_velocity_grid(self, steps: Sequence[int], output_path: Path, cmap: Optional[str] = None,
+                              quiver: bool = True, quiver_stride: Optional[int] = None,
+                              zoom_box: Optional[ZoomBox] = None) -> Path:
+        if not steps:
+            raise ValueError("No steps selected")
+        ncols = min(6, max(1, len(steps)))
+        nrows = -(-len(steps) // ncols)
+        fig = Figure(figsize=(5 * ncols, 4.5 * nrows))
+        self.draw_velocity_grid(fig, steps, cmap=cmap, quiver=quiver,
+                                 quiver_stride=quiver_stride, zoom_box=zoom_box)
         fig.tight_layout()
         output_path.parent.mkdir(parents=True, exist_ok=True)
         fig.savefig(output_path, dpi=150)

@@ -23,6 +23,7 @@ from matplotlib.widgets import RectangleSelector
 from .gui_style import PANEL_BG
 from .gui_widgets import StepRangeControl, ZoomBox, ZoomControl
 from .render import COMMON_CMAPS, FieldRenderer
+from .seg_match import default_output_dir
 from .segmentation import draw_segmentation_evolution, export_segmentation_evolution
 
 
@@ -67,7 +68,7 @@ class VisualizerTabMixin:
                          command=self._refresh_preview).grid(row=1, column=0, columnspan=2, sticky="w", pady=(4, 0))
 
         self.evolution_var = tk.BooleanVar(value=False)
-        ttk.Checkbutton(contour, text="evolution preview (all selected steps, not just this frame)",
+        ttk.Checkbutton(contour, text="evolution preview (all selected steps: contour overlay, or velocity grid)",
                          variable=self.evolution_var, command=self._refresh_preview).grid(
             row=2, column=0, columnspan=2, sticky="w", pady=(4, 0))
 
@@ -156,6 +157,24 @@ class VisualizerTabMixin:
             return
         try:
             self.figure.clf()
+            crop = self.zoom_control.box() if self.zoom_control.enabled_var.get() else None
+            is_velocity_grid = field_name == "velocity" and self.evolution_var.get()
+
+            if is_velocity_grid:
+                # Small-multiples grid fills the whole figure with its own
+                # axes, so there's no single self.ax for the rectangle
+                # selector or a side-by-side segmentation panel here.
+                self.ax = None
+                self.seg_ax = None
+                steps = self.range_control.selected_steps
+                self.exporter.draw_velocity_grid(self.figure, steps, cmap=self.cmap_var.get(),
+                                                  quiver=self.quiver_var.get(), zoom_box=crop)
+                status = f"Previewing velocity grid  —  {len(steps)} step(s)"
+                self.figure.tight_layout()
+                self.canvas.draw_idle()
+                self.status_var.set(status)
+                return
+
             show_seg = self._show_segmentation()
             if show_seg:
                 self.ax, self.seg_ax = self.figure.subplots(1, 2)
@@ -163,7 +182,6 @@ class VisualizerTabMixin:
                 self.ax = self.figure.add_subplot(111)
                 self.seg_ax = None
 
-            crop = self.zoom_control.box() if self.zoom_control.enabled_var.get() else None
             if self.evolution_var.get():
                 steps = self.range_control.selected_steps
                 self.exporter.draw_contour_evolution(self.ax, field_name, steps, zoom_box=crop)
@@ -206,8 +224,18 @@ class VisualizerTabMixin:
             raise ValueError("No steps selected — check the field and range")
         return steps
 
+    def _viz_output_dir(self) -> Path:
+        """One shared 'visualization' folder for every export — simulation
+        and matching alike — at the root of the series: the segmentation
+        folder's parent when a segmentation is loaded (matching Region
+        Matching's own convention, see seg_match.default_output_dir), else
+        the simulation folder's parent."""
+        if self.segmentation is not None:
+            return default_output_dir(self.segmentation.folder)
+        return Path(self.sim_path_var.get()).parent / "visualization"
+
     def _output_path(self, name: str) -> Path:
-        return Path(self.sim_path_var.get()) / "viz" / name
+        return self._viz_output_dir() / name
 
     def _active_zoom_box(self) -> Optional[ZoomBox]:
         return self.zoom_control.box() if self.zoom_control.enabled_var.get() else None
@@ -251,8 +279,7 @@ class VisualizerTabMixin:
             return
         try:
             indices = self.segmentation.indices()
-            out = Path(self.segmentation_path_var.get()) / "viz" / \
-                f"segmentation_evolution_{indices[0]}_{indices[-1]}.png"
+            out = self._viz_output_dir() / f"segmentation_evolution_{indices[0]}_{indices[-1]}.png"
             path = export_segmentation_evolution(self.segmentation, out, threshold=self._segmentation_threshold())
             self.status_var.set(f"Segmentation evolution exported to {path}")
             messagebox.showinfo("Export done", f"Segmentation evolution saved to {path}")

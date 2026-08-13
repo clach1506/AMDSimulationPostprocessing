@@ -241,7 +241,7 @@ def draw_overlay(ax, source_path: Path, data: SimulationData, field: str, step: 
     ax.set_ylim(*y_bounds)
     ax.set_aspect("equal")
     ax.set_axis_off()
-    ax.set_title(title or f"{source_path.name}  —  sim {field} t={step}", fontsize=9)
+    ax.set_title(title or f"{source_path.name}  —  sim {field} {data.time_label(step)}", fontsize=9)
 
 
 def render_overlay(source_path: Path, data: SimulationData, field: str, step: int,
@@ -274,7 +274,7 @@ def export_overlay_gif(frames: Sequence["FrameMatch"], data: SimulationData, fie
     if not usable:
         raise ValueError("No frames with a paired source image to animate")
     images = [render_overlay(f.source, data, field, f.step, density_threshold,
-                              title=f"{f.segmentation.name}  —  t={f.step}  (Dice={f.dice:.3f})")
+                              title=f"{f.segmentation.name}  —  {data.time_label(f.step)}  (Dice={f.dice:.3f})")
               for f in usable]
     output_path.parent.mkdir(parents=True, exist_ok=True)
     images[0].save(output_path, save_all=True, append_images=images[1:],
