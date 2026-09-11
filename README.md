@@ -7,6 +7,10 @@ The interface takes as a minimal a simulation output folder, directly compatible
 export logic :
 - `grid.dat` 
 - one subfolder per field: density, velocity, levelset, strain (`field_xxx.bin` files)
+- Optional nematic visualization is enabled by scalar `density`, `nematic_xx`,
+  and `nematic_xy` folders with common timesteps. It uses
+  `Q = [[qxx, qxy], [qxy, -qxx]]` and `S = 2 sqrt(qxx^2 + qxy^2)`; the
+  director is derived while plotting rather than exported separately.
 
 ## Run
 Install dependencies:
@@ -26,6 +30,7 @@ python3.13 SimulationPostprocessing.py [sim_dir]
 ### Visualizer tab
 - Load a simulation folder; pick a field, colormap, step range and stride.
 - Live preview with a frame slider
+- Combined density/nematic preview and GIF when all three nematic inputs are available.
 - TO ZOOM on a specific area (bridges per example) : Draw a rectangle directly on the preview to define a zoom subwindow, then
   optionally crop the preview
 - Optionally load a segmentation folder to preview its own contour evolution

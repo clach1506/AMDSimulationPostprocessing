@@ -370,15 +370,17 @@ class FrameMatch:
     dice: float
     date: Optional[date] = None
     day: Optional[int] = None  # days since the series' first dated frame
+    neighborhood_width_count: int = 1
 
 
 ProgressCallback = Callable[[int, int, "FrameMatch"], None]
 
 
 def process_folder(segmentation_dir: Path, sim: Union[Path, SimulationData], source_dir: Optional[Path] = None,
-                    field: str = "levelset", density_threshold: float = 0.5,
-                    subsample: int = 10, neighborhood: int = 8, dates_csv: Optional[Path] = None,
-                    progress: Optional[ProgressCallback] = None) -> List[FrameMatch]:
+                     field: str = "levelset", density_threshold: float = 0.5,
+                     subsample: int = 10, neighborhood: int = 8, dates_csv: Optional[Path] = None,
+                     tolerance: float = 1e-4,
+                     progress: Optional[ProgressCallback] = None) -> List[FrameMatch]:
     """One best-matching simulation step per segmentation image, sorted the
     same numeric-aware way as the segmentation folder. `source_dir` is
     optional — matching only needs the segmentation and the simulation.
@@ -412,9 +414,11 @@ def process_folder(segmentation_dir: Path, sim: Union[Path, SimulationData], sou
     results: List[FrameMatch] = []
     for i, (seg_path, source_path, frame_date, day) in enumerate(zip(seg_files, source_files, dates_list, days_list)):
         seg_mask = load_segmentation_mask(seg_path, nx, ny)
-        step, score, _ = coarse_to_fine_search(seg_mask, data, field, density_threshold, subsample, neighborhood)
+        step, score, evaluated = coarse_to_fine_search(seg_mask, data, field, density_threshold, subsample, neighborhood)
+        neighborhood_width_count = sum(abs(value - score) <= tolerance for value in evaluated.values())
         match = FrameMatch(segmentation=seg_path, source=source_path, step=step, dice=score,
-                            date=frame_date, day=day)
+                            date=frame_date, day=day,
+                            neighborhood_width_count=neighborhood_width_count)
         results.append(match)
         if progress is not None:
             progress(i + 1, len(seg_files), match)

@@ -20,6 +20,7 @@ import matplotlib.animation as animation
 import matplotlib.colors as mcolors
 from matplotlib.cm import ScalarMappable
 from matplotlib.figure import Figure
+from matplotlib.collections import LineCollection
 import numpy as np
 
 from .data import SimulationData
@@ -46,6 +47,9 @@ CONTOUR_COLOR = "black"
 CONTOUR_LINEWIDTH = 1.0
 DEFAULT_SCALAR_CMAP = "inferno"
 DEFAULT_VELOCITY_CMAP = "speed"
+DEFAULT_NEMATIC_CMAP = "gray_r"
+DEFAULT_NEMATIC_DENSITY_THRESHOLD = 0.5
+DEFAULT_NEMATIC_ORDER_THRESHOLD = 1e-8
 DEFAULT_BANDS = 9
 EVOLUTION_CMAP = "plasma"
 
@@ -73,8 +77,10 @@ class FieldRenderer:
     """Stateless drawing helpers: array in, artists on an existing Axes out."""
 
     @staticmethod
-    def scalar(ax, x_edges, y_edges, values: np.ndarray, cmap, title: str = "", colorbar: bool = True):
-        mesh = ax.pcolormesh(x_edges, y_edges, values.T, cmap=resolve_cmap(cmap), shading="auto")
+    def scalar(ax, x_edges, y_edges, values: np.ndarray, cmap, title: str = "", colorbar: bool = True,
+               value_range: Optional[Tuple[float, float]] = None):
+        mesh = ax.pcolormesh(x_edges, y_edges, values.T, cmap=resolve_cmap(cmap), shading="auto",
+                             vmin=value_range[0] if value_range else None, vmax=value_range[1] if value_range else None)
         ax.set_title(title)
         ax.set_xlabel("x")
         ax.set_ylabel("y")
@@ -85,8 +91,9 @@ class FieldRenderer:
 
     @staticmethod
     def contour(ax, xs, ys, x_edges, y_edges, backdrop_values: np.ndarray, contour_values: np.ndarray, level: float,
-                backdrop_cmap: Optional[str] = None, banded: bool = True, n_bands: int = DEFAULT_BANDS,
-                show_contour: bool = True, title: str = "", colorbar: bool = True):
+                 backdrop_cmap: Optional[str] = None, banded: bool = True, n_bands: int = DEFAULT_BANDS,
+                 show_contour: bool = True, title: str = "", colorbar: bool = True,
+                 value_range: Optional[Tuple[float, float]] = None):
         """`backdrop_values` (a heatmap, using `backdrop_cmap`) with the
         interface/boundary contour line for `contour_values` drawn on top in a
         thin black line. `contour_values` is deliberately a separate array
@@ -107,9 +114,12 @@ class FieldRenderer:
         mesh = None
         if backdrop_cmap is not None:
             if banded:
-                mesh = ax.contourf(xs, ys, backdrop_values.T, levels=n_bands, cmap=resolve_cmap(backdrop_cmap))
+                levels = np.linspace(*value_range, n_bands + 1) if value_range else n_bands
+                mesh = ax.contourf(xs, ys, backdrop_values.T, levels=levels, cmap=resolve_cmap(backdrop_cmap))
             else:
-                mesh = ax.pcolormesh(x_edges, y_edges, backdrop_values.T, cmap=resolve_cmap(backdrop_cmap), shading="auto")
+                mesh = ax.pcolormesh(x_edges, y_edges, backdrop_values.T, cmap=resolve_cmap(backdrop_cmap), shading="auto",
+                                     vmin=value_range[0] if value_range else None,
+                                     vmax=value_range[1] if value_range else None)
             if colorbar:
                 ax.figure.colorbar(mesh, ax=ax, fraction=0.046, pad=0.04)
         else:
@@ -127,11 +137,14 @@ class FieldRenderer:
 
     @staticmethod
     def velocity(ax, xs, ys, x_edges, y_edges, vector: np.ndarray, cmap=DEFAULT_VELOCITY_CMAP,
-                 quiver: bool = True, quiver_stride: Optional[int] = None, title: str = "", colorbar: bool = True):
+                 quiver: bool = True, quiver_stride: Optional[int] = None, title: str = "", colorbar: bool = True,
+                 value_range: Optional[Tuple[float, float]] = None):
         vx = vector[:, :, 0].T
         vy = vector[:, :, 1].T
         speed = np.sqrt(vx ** 2 + vy ** 2)
-        mesh = ax.pcolormesh(x_edges, y_edges, speed, cmap=resolve_cmap(cmap), shading="auto")
+        mesh = ax.pcolormesh(x_edges, y_edges, speed, cmap=resolve_cmap(cmap), shading="auto",
+                             vmin=value_range[0] if value_range else None, vmax=value_range[1] if value_range else None)
+        arrows = None
         if quiver:
             # Dense by default (roughly one arrow every couple of cells) —
             # a sparse quiver hides the flow pattern near the interface,
@@ -139,14 +152,48 @@ class FieldRenderer:
             stride = quiver_stride or max(1, vx.shape[1] // 45)
             X, Y = np.meshgrid(xs, ys)
             sl = (slice(None, None, stride), slice(None, None, stride))
-            ax.quiver(X[sl], Y[sl], vx[sl], vy[sl], color="black", scale=None)
+            arrows = ax.quiver(X[sl], Y[sl], vx[sl], vy[sl], color="black", scale=None)
         ax.set_title(title)
         ax.set_xlabel("x")
         ax.set_ylabel("y")
         ax.set_aspect("equal")
         if colorbar:
             ax.figure.colorbar(mesh, ax=ax, label="Speed", fraction=0.046, pad=0.04)
-        return mesh
+        return mesh, arrows
+
+    @staticmethod
+    def nematic(ax, xs, ys, x_edges, y_edges, density: np.ndarray, qxx: np.ndarray, qxy: np.ndarray,
+                cmap=DEFAULT_NEMATIC_CMAP, director_stride: Optional[int] = None,
+                density_threshold: float = DEFAULT_NEMATIC_DENSITY_THRESHOLD,
+                order_threshold: float = DEFAULT_NEMATIC_ORDER_THRESHOLD, title: str = "",
+                colorbar: bool = True, value_range: Optional[Tuple[float, float]] = None):
+        if density.shape != qxx.shape or density.shape != qxy.shape:
+            raise ValueError("density, nematic_xx, and nematic_xy must have the same shape")
+        mesh = ax.pcolormesh(x_edges, y_edges, density.T, cmap=resolve_cmap(cmap), shading="auto",
+                             vmin=value_range[0] if value_range else None,
+                             vmax=value_range[1] if value_range else None)
+        order = 2.0 * np.hypot(qxx, qxy)
+        angle = 0.5 * np.arctan2(qxy, qxx)
+        stride = director_stride or max(1, max(density.shape) // 35)
+        ix, iy = np.meshgrid(np.arange(0, density.shape[0], stride),
+                             np.arange(0, density.shape[1], stride), indexing="ij")
+        mask = (density[ix, iy] >= density_threshold) & (order[ix, iy] > order_threshold)
+        centers = np.column_stack((xs[ix[mask]], ys[iy[mask]]))
+        directions = np.column_stack((np.cos(angle[ix, iy][mask]), np.sin(angle[ix, iy][mask])))
+        spacing = min(float(np.min(np.diff(xs))) if len(xs) > 1 else 1.0,
+                      float(np.min(np.diff(ys))) if len(ys) > 1 else 1.0)
+        lengths = spacing * stride * np.clip(order[ix, iy][mask], 0.0, 1.0)
+        offsets = 0.45 * lengths[:, None] * directions
+        directors = LineCollection(np.stack((centers - offsets, centers + offsets), axis=1),
+                                   colors="black", linewidths=1.0)
+        ax.add_collection(directors)
+        ax.set_title(title)
+        ax.set_xlabel("x")
+        ax.set_ylabel("y")
+        ax.set_aspect("equal")
+        if colorbar:
+            ax.figure.colorbar(mesh, ax=ax, label="Density", fraction=0.046, pad=0.04)
+        return mesh, directors
 
     @staticmethod
     def draw_zoom_box(ax, zoom_box: ZoomBox, color: str = "red") -> None:
@@ -182,6 +229,8 @@ class Exporter:
     def default_cmap(self, field_name: str) -> str:
         if field_name == "velocity":
             return DEFAULT_VELOCITY_CMAP
+        if field_name == "nematic":
+            return DEFAULT_NEMATIC_CMAP
         return SCALAR_CMAPS.get(field_name, DEFAULT_SCALAR_CMAP)
 
     def default_level(self, field_name: str) -> float:
@@ -214,12 +263,25 @@ class Exporter:
     def draw_field(self, ax, field_name: str, step: int, cmap: Optional[str] = None, level: Optional[float] = None,
                     backdrop: bool = True, banded: bool = True, show_contour: bool = True,
                     contour_field: Optional[str] = None,
-                    quiver: bool = True, quiver_stride: Optional[int] = None, colorbar: bool = True) -> None:
+                    quiver: bool = True, quiver_stride: Optional[int] = None, colorbar: bool = True,
+                    density_threshold: float = DEFAULT_NEMATIC_DENSITY_THRESHOLD,
+                    order_threshold: float = DEFAULT_NEMATIC_ORDER_THRESHOLD,
+                    director_stride: Optional[int] = None) -> None:
         if field_name == "velocity":
             values = self.data.load_field(field_name, step)
             FieldRenderer.velocity(ax, self.xs, self.ys, self.x_edges, self.y_edges, values,
                                     cmap=cmap or DEFAULT_VELOCITY_CMAP, quiver=quiver, quiver_stride=quiver_stride,
-                                    title=f"velocity  t={step}", colorbar=colorbar)
+                                    title=f"velocity  t={step}", colorbar=colorbar,
+                                    value_range=self.data.display_range(field_name))
+        elif field_name == "nematic":
+            FieldRenderer.nematic(
+                ax, self.xs, self.ys, self.x_edges, self.y_edges,
+                self.data.load_field("density", step), self.data.load_field("nematic_xx", step),
+                self.data.load_field("nematic_xy", step), cmap=cmap or DEFAULT_NEMATIC_CMAP,
+                director_stride=director_stride, density_threshold=density_threshold,
+                order_threshold=order_threshold, title=f"nematic  t={step}", colorbar=colorbar,
+                value_range=self.data.display_range("density"),
+            )
         elif self.is_contour_field(field_name):
             values = self._load_for_contour(field_name, step)
             c_field = contour_field if contour_field is not None else self.default_contour_field(field_name)
@@ -228,22 +290,24 @@ class Exporter:
             FieldRenderer.contour(ax, self.xs, self.ys, self.x_edges, self.y_edges,
                                    backdrop_values=values, contour_values=contour_values, level=eff_level,
                                    backdrop_cmap=(cmap or DEFAULT_SCALAR_CMAP) if backdrop else None, banded=banded,
-                                   show_contour=show_contour, title=f"{field_name}  t={step}", colorbar=colorbar)
+                                   show_contour=show_contour, title=f"{field_name}  t={step}", colorbar=colorbar,
+                                   value_range=self.data.display_range(field_name))
         else:
             values = self.data.load_field(field_name, step)
             FieldRenderer.scalar(ax, self.x_edges, self.y_edges, values,
                                   cmap=cmap or DEFAULT_SCALAR_CMAP,
-                                  title=f"{field_name}  t={step}", colorbar=colorbar)
+                                  title=f"{field_name}  t={step}", colorbar=colorbar,
+                                  value_range=self.data.display_range(field_name))
 
     # -- GIF (animated single field over time) ---------------------------------
 
     def export_gif(self, field_name: str, steps: Sequence[int], output_path: Path, fps: int = 10,
                     cmap: Optional[str] = None, level: Optional[float] = None, backdrop: bool = True,
                     show_contour: bool = True, contour_field: Optional[str] = None,
-                    zoom_box: Optional[ZoomBox] = None) -> Path:
-        if field_name == "velocity":
-            raise ValueError("GIF export is only supported for scalar fields (density, levelset, strain*). "
-                              "Use the velocity snapshot grid export instead.")
+                     zoom_box: Optional[ZoomBox] = None, quiver: bool = True,
+                     density_threshold: float = DEFAULT_NEMATIC_DENSITY_THRESHOLD,
+                     order_threshold: float = DEFAULT_NEMATIC_ORDER_THRESHOLD,
+                     director_stride: Optional[int] = None) -> Path:
         if not steps:
             raise ValueError("No steps selected")
         c_field = contour_field if contour_field is not None else self.default_contour_field(field_name)
@@ -251,22 +315,46 @@ class Exporter:
         fig = Figure(figsize=(6, 5))
         ax = fig.add_subplot(111)
         cmap_obj = resolve_cmap(cmap or DEFAULT_SCALAR_CMAP)
+        value_range = self.data.display_range("density" if field_name == "nematic" else field_name) \
+            if hasattr(self.data, "display_range") else None
         if not backdrop:
             ax.set_facecolor("white")
         artists = []
         for step in steps:
-            values = self._load_for_contour(field_name, step)
-            contour_values = values if c_field == field_name else self._resolve_contour_values(c_field, step, values)
             frame_artists = []
-            if backdrop:
-                mesh = ax.pcolormesh(self.x_edges, self.y_edges, values.T, cmap=cmap_obj, shading="auto")
+            if field_name == "velocity":
+                values = self.data.load_field(field_name, step)
+                mesh, arrows = FieldRenderer.velocity(
+                    ax, self.xs, self.ys, self.x_edges, self.y_edges, values,
+                    cmap=cmap or DEFAULT_VELOCITY_CMAP, quiver=quiver, colorbar=False,
+                    value_range=value_range,
+                )
                 frame_artists.append(mesh)
-            if show_contour:
-                cs = ax.contour(self.xs, self.ys, contour_values.T, levels=[eff_level],
-                                 colors=CONTOUR_COLOR, linewidths=CONTOUR_LINEWIDTH)
-                # matplotlib >=3.8 makes QuadContourSet itself a single Artist;
-                # older versions expose the line segments via .collections.
-                frame_artists.extend(getattr(cs, "collections", [cs]))
+                if arrows is not None:
+                    frame_artists.append(arrows)
+            elif field_name == "nematic":
+                mesh, directors = FieldRenderer.nematic(
+                    ax, self.xs, self.ys, self.x_edges, self.y_edges,
+                    self.data.load_field("density", step), self.data.load_field("nematic_xx", step),
+                    self.data.load_field("nematic_xy", step), cmap=cmap or DEFAULT_NEMATIC_CMAP,
+                    director_stride=director_stride, density_threshold=density_threshold,
+                    order_threshold=order_threshold, colorbar=False, value_range=value_range,
+                )
+                frame_artists.extend((mesh, directors))
+            else:
+                values = self._load_for_contour(field_name, step)
+                contour_values = values if c_field == field_name else self._resolve_contour_values(c_field, step, values)
+                if backdrop:
+                    mesh = ax.pcolormesh(self.x_edges, self.y_edges, values.T, cmap=cmap_obj, shading="auto",
+                                         vmin=value_range[0] if value_range else None,
+                                         vmax=value_range[1] if value_range else None)
+                    frame_artists.append(mesh)
+                if show_contour:
+                    cs = ax.contour(self.xs, self.ys, contour_values.T, levels=[eff_level],
+                                    colors=CONTOUR_COLOR, linewidths=CONTOUR_LINEWIDTH)
+                    # matplotlib >=3.8 makes QuadContourSet itself a single Artist;
+                    # older versions expose the line segments via .collections.
+                    frame_artists.extend(getattr(cs, "collections", [cs]))
             # Simulation time (step * dt from metadata.json) when known,
             # else the raw step — as its own text artist so it updates every
             # frame instead of staying fixed like a plain ax.set_title would.
@@ -393,7 +481,8 @@ class Exporter:
             values = self.data.load_field("velocity", step)
             FieldRenderer.velocity(ax, self.xs, self.ys, self.x_edges, self.y_edges, values,
                                     cmap=cmap or DEFAULT_VELOCITY_CMAP, quiver=quiver,
-                                    quiver_stride=quiver_stride, title=self.data.time_label(step))
+                                    quiver_stride=quiver_stride, title=self.data.time_label(step),
+                                    value_range=self.data.display_range("velocity"))
             if zoom_box is not None:
                 xmin, xmax, ymin, ymax = zoom_box
                 ax.set_xlim(xmin, xmax)

@@ -21,6 +21,7 @@ from geometry.format import read_field_compact, read_grid
 STEP_PATTERN = re.compile(r"_(\d+)\.bin$")
 
 VECTOR_FIELDS = {"velocity"}
+NEMATIC_FIELDS = {"density", "nematic_xx", "nematic_xy"}
 
 
 @dataclass
@@ -30,6 +31,8 @@ class SimulationData:
     grid: Dict[str, float] = field(init=False)
     fields: Dict[str, List[int]] = field(init=False)
     metadata: Dict = field(init=False)
+    field_ranges: Dict[str, Tuple[float, float]] = field(init=False, default_factory=dict)
+    _field_cache: Dict[Tuple[str, int], np.ndarray] = field(init=False, default_factory=dict)
 
     def __post_init__(self) -> None:
         self.sim_dir = Path(self.sim_dir)
@@ -37,6 +40,7 @@ class SimulationData:
         self.grid = read_grid(self._find_grid_path(self.sim_dir))
         self.fields = self._discover_fields(self.field_root)
         self.metadata = self._read_metadata(self.sim_dir, self.field_root)
+        self._preload_fields()
 
     # -- discovery ---------------------------------------------------------
 
@@ -91,9 +95,15 @@ class SimulationData:
     # -- queries -------------------------------------------------------------
 
     def available_fields(self) -> List[str]:
-        return sorted(self.fields.keys())
+        fields = set(self.fields)
+        if NEMATIC_FIELDS <= fields:
+            fields.add("nematic")
+        return sorted(fields)
 
     def available_steps(self, field_name: str) -> List[int]:
+        if field_name == "nematic":
+            return sorted(set.intersection(*(set(self.fields[name]) for name in NEMATIC_FIELDS))) \
+                if NEMATIC_FIELDS <= self.fields.keys() else []
         return self.fields.get(field_name, [])
 
     def nearest_step(self, field_name: str, step: int) -> Optional[int]:
@@ -115,6 +125,9 @@ class SimulationData:
 
     def is_vector_field(self, field_name: str) -> bool:
         return field_name in VECTOR_FIELDS
+
+    def display_range(self, field_name: str) -> Optional[Tuple[float, float]]:
+        return self.field_ranges.get(field_name)
 
     def dt(self) -> Optional[float]:
         return self.metadata.get("numerics", {}).get("dt")
@@ -139,15 +152,36 @@ class SimulationData:
         raise FileNotFoundError(f"Missing field file: {path}")
 
     def load_field(self, field_name: str, step: int) -> np.ndarray:
+        key = (field_name, step)
+        if key in self._field_cache:
+            return self._field_cache[key]
         path = self.get_field_path(field_name, step)
         arr = read_field_compact(path)
         if self.is_vector_field(field_name):
             if arr.ndim != 3:
                 raise ValueError(f"Expected vector field for {field_name}@{step}, got shape {arr.shape}")
-            return arr
-        if arr.ndim != 2:
+        elif arr.ndim != 2:
             raise ValueError(f"Expected scalar field for {field_name}@{step}, got shape {arr.shape}")
+        self._field_cache[key] = arr
         return arr
+
+    def _preload_fields(self) -> None:
+        for field_name, steps in self.fields.items():
+            low, high = np.inf, -np.inf
+            for step in steps:
+                values = self.load_field(field_name, step)
+                if self.is_vector_field(field_name):
+                    values = np.linalg.norm(values, axis=-1)
+                elif field_name == "levelset":
+                    values = np.clip(-values, 0.0, None)
+                finite = values[np.isfinite(values)]
+                if finite.size:
+                    low = min(low, float(finite.min()))
+                    high = max(high, float(finite.max()))
+            if np.isfinite(low):
+                if low == high:
+                    high = low + 1.0
+                self.field_ranges[field_name] = low, high
 
     # -- geometry -----------------------------------------------------------
 

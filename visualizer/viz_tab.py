@@ -247,7 +247,8 @@ class VisualizerTabMixin:
             field_name = self.field_var.get()
             out = self._output_path(f"{field_name}_anim_{steps[0]}_{steps[-1]}_s{self.range_control.stride_var.get()}.gif")
             path = self.exporter.export_gif(field_name, steps, out, cmap=self.cmap_var.get(), backdrop=True,
-                                             show_contour=self.contour_var.get(), zoom_box=self._active_zoom_box())
+                                             show_contour=self.contour_var.get(), zoom_box=self._active_zoom_box(),
+                                             quiver=self.quiver_var.get())
             self.status_var.set(f"GIF exported to {path}")
             messagebox.showinfo("Export done", f"GIF saved to {path}")
         except Exception as exc:

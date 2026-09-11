@@ -72,6 +72,8 @@ def parse_args() -> argparse.Namespace:
                          help="Coarse search: check every Nth step first (default: 10)")
     parser.add_argument("--neighborhood", type=int, default=8,
                          help="Fine search: dense re-scan +/- N steps (by index) around the coarse best (default: 8)")
+    parser.add_argument("--tolerance", type=float, default=1e-4,
+                         help="Score tolerance for counting equally good neighborhood matches")
     parser.add_argument("--exhaustive", action="store_true",
                          help="Single-image mode only: scan every step instead of coarse-to-fine, "
                               "and print the full curve")
@@ -87,15 +89,16 @@ def run_folder(args: argparse.Namespace) -> None:
 
     results = process_folder(args.segmentation, data, args.sources, field=args.field,
                               density_threshold=args.density_threshold, subsample=args.subsample,
-                              neighborhood=args.neighborhood, progress=progress)
+                              neighborhood=args.neighborhood, tolerance=args.tolerance, progress=progress)
 
     output_dir.mkdir(parents=True, exist_ok=True)
     csv_path = output_dir / "match_results.csv"
     with open(csv_path, "w", newline="") as f:
         writer = csv.writer(f)
-        writer.writerow(["segmentation", "source", "best_step", "dice"])
+        writer.writerow(["segmentation", "source", "best_step", "dice", "neighborhood_width_count"])
         for m in results:
-            writer.writerow([m.segmentation.name, m.source.name if m.source else "", m.step, f"{m.dice:.4f}"])
+            writer.writerow([m.segmentation.name, m.source.name if m.source else "", m.step,
+                             f"{m.dice:.4f}", m.neighborhood_width_count])
     print(f"\nCSV -> {csv_path}")
 
     if args.sources is not None:
@@ -140,4 +143,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
