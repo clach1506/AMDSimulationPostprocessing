@@ -21,7 +21,7 @@ from geometry.format import read_field_compact, read_grid
 STEP_PATTERN = re.compile(r"_(\d+)\.bin$")
 
 VECTOR_FIELDS = {"velocity"}
-NEMATIC_FIELDS = {"density", "nematic_xx", "nematic_xy"}
+NEMATIC_FIELDS = {"density", "strain_xx", "strain_yy", "strain_xy"}
 
 
 @dataclass
@@ -182,6 +182,19 @@ class SimulationData:
                 if low == high:
                     high = low + 1.0
                 self.field_ranges[field_name] = low, high
+        nematic_steps = self.available_steps("nematic")
+        if nematic_steps:
+            low, high = np.inf, -np.inf
+            for step in nematic_steps:
+                order = np.hypot(self.load_field("strain_xx", step) - self.load_field("strain_yy", step),
+                                 2.0 * self.load_field("strain_xy", step))
+                tissue = self.load_field("density", step) >= 0.5
+                finite = order[tissue & np.isfinite(order)]
+                if finite.size:
+                    low = min(low, float(finite.min()))
+                    high = max(high, float(finite.max()))
+            if np.isfinite(low):
+                self.field_ranges["nematic"] = (low, high if high > low else low + 1.0)
 
     # -- geometry -----------------------------------------------------------
 

@@ -166,7 +166,8 @@ class FieldRenderer:
                 cmap=DEFAULT_NEMATIC_CMAP, director_stride: Optional[int] = None,
                 density_threshold: float = DEFAULT_NEMATIC_DENSITY_THRESHOLD,
                 order_threshold: float = DEFAULT_NEMATIC_ORDER_THRESHOLD, title: str = "",
-                colorbar: bool = True, value_range: Optional[Tuple[float, float]] = None):
+                colorbar: bool = True, value_range: Optional[Tuple[float, float]] = None,
+                order_range: Optional[Tuple[float, float]] = None):
         if density.shape != qxx.shape or density.shape != qxy.shape:
             raise ValueError("density, nematic_xx, and nematic_xy must have the same shape")
         mesh = ax.pcolormesh(x_edges, y_edges, density.T, cmap=resolve_cmap(cmap), shading="auto",
@@ -182,10 +183,14 @@ class FieldRenderer:
         directions = np.column_stack((np.cos(angle[ix, iy][mask]), np.sin(angle[ix, iy][mask])))
         spacing = min(float(np.min(np.diff(xs))) if len(xs) > 1 else 1.0,
                       float(np.min(np.diff(ys))) if len(ys) > 1 else 1.0)
-        lengths = spacing * stride * np.clip(order[ix, iy][mask], 0.0, 1.0)
-        offsets = 0.45 * lengths[:, None] * directions
+        offsets = 0.45 * spacing * stride * directions
+        colors = np.zeros((len(centers), 4))
+        visible_order = order[ix, iy][mask]
+        if order_range and order_range[1] > order_range[0]:
+            visible_order = (visible_order - order_range[0]) / (order_range[1] - order_range[0])
+        colors[:, 3] = 0.15 + 0.85 * np.clip(visible_order, 0.0, 1.0)
         directors = LineCollection(np.stack((centers - offsets, centers + offsets), axis=1),
-                                   colors="black", linewidths=1.0)
+                                   colors=colors, linewidths=1.0)
         ax.add_collection(directors)
         ax.set_title(title)
         ax.set_xlabel("x")
@@ -193,6 +198,9 @@ class FieldRenderer:
         ax.set_aspect("equal")
         if colorbar:
             ax.figure.colorbar(mesh, ax=ax, label="Density", fraction=0.046, pad=0.04)
+            ax.text(0.02, 0.02, "Director opacity: shape anisotropy S",
+                    transform=ax.transAxes, ha="left", va="bottom", fontsize=9,
+                    bbox=dict(facecolor="white", alpha=0.75, edgecolor="none", pad=3))
         return mesh, directors
 
     @staticmethod
@@ -274,13 +282,15 @@ class Exporter:
                                     title=f"velocity  t={step}", colorbar=colorbar,
                                     value_range=self.data.display_range(field_name))
         elif field_name == "nematic":
+            strain_xx = self.data.load_field("strain_xx", step)
+            strain_yy = self.data.load_field("strain_yy", step)
             FieldRenderer.nematic(
                 ax, self.xs, self.ys, self.x_edges, self.y_edges,
-                self.data.load_field("density", step), self.data.load_field("nematic_xx", step),
-                self.data.load_field("nematic_xy", step), cmap=cmap or DEFAULT_NEMATIC_CMAP,
+                self.data.load_field("density", step), 0.5 * (strain_xx - strain_yy),
+                self.data.load_field("strain_xy", step), cmap=cmap or DEFAULT_NEMATIC_CMAP,
                 director_stride=director_stride, density_threshold=density_threshold,
                 order_threshold=order_threshold, title=f"nematic  t={step}", colorbar=colorbar,
-                value_range=self.data.display_range("density"),
+                value_range=self.data.display_range("density"), order_range=self.data.display_range("nematic"),
             )
         elif self.is_contour_field(field_name):
             values = self._load_for_contour(field_name, step)
@@ -333,12 +343,15 @@ class Exporter:
                 if arrows is not None:
                     frame_artists.append(arrows)
             elif field_name == "nematic":
+                strain_xx = self.data.load_field("strain_xx", step)
+                strain_yy = self.data.load_field("strain_yy", step)
                 mesh, directors = FieldRenderer.nematic(
                     ax, self.xs, self.ys, self.x_edges, self.y_edges,
-                    self.data.load_field("density", step), self.data.load_field("nematic_xx", step),
-                    self.data.load_field("nematic_xy", step), cmap=cmap or DEFAULT_NEMATIC_CMAP,
+                    self.data.load_field("density", step), 0.5 * (strain_xx - strain_yy),
+                    self.data.load_field("strain_xy", step), cmap=cmap or DEFAULT_NEMATIC_CMAP,
                     director_stride=director_stride, density_threshold=density_threshold,
                     order_threshold=order_threshold, colorbar=False, value_range=value_range,
+                    order_range=self.data.display_range("nematic"),
                 )
                 frame_artists.extend((mesh, directors))
             else:
