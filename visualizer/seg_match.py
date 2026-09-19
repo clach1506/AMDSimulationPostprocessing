@@ -274,7 +274,9 @@ def export_overlay_gif(frames: Sequence["FrameMatch"], data: SimulationData, fie
     if not usable:
         raise ValueError("No frames with a paired source image to animate")
     images = [render_overlay(f.source, data, field, f.step, density_threshold,
-                              title=f"{f.segmentation.name}  —  {data.time_label(f.step)}  (Dice={f.dice:.3f})")
+                              title=f"{f.segmentation.name}  —  "
+                                    f"{f'Day {f.day}' if f.day is not None else data.time_label(f.step)}"
+                                    f"  (Dice={f.dice:.3f})")
               for f in usable]
     output_path.parent.mkdir(parents=True, exist_ok=True)
     images[0].save(output_path, save_all=True, append_images=images[1:],
