@@ -73,6 +73,10 @@ def _prepare_levelset(values: np.ndarray) -> np.ndarray:
     return np.clip(-values, 0.0, None)
 
 
+def _mask_density_holes(values: np.ndarray) -> np.ma.MaskedArray:
+    return np.ma.masked_equal(values, 0.0, copy=False)
+
+
 class FieldRenderer:
     """Stateless drawing helpers: array in, artists on an existing Axes out."""
 
@@ -170,7 +174,8 @@ class FieldRenderer:
                 order_range: Optional[Tuple[float, float]] = None):
         if density.shape != qxx.shape or density.shape != qxy.shape:
             raise ValueError("density, nematic_xx, and nematic_xy must have the same shape")
-        mesh = ax.pcolormesh(x_edges, y_edges, density.T, cmap=resolve_cmap(cmap), shading="auto",
+        mesh = ax.pcolormesh(x_edges, y_edges, _mask_density_holes(density).T,
+                             cmap=resolve_cmap(cmap), shading="auto",
                              vmin=value_range[0] if value_range else None,
                              vmax=value_range[1] if value_range else None)
         order = 2.0 * np.hypot(qxx, qxy)
@@ -188,7 +193,7 @@ class FieldRenderer:
         visible_order = order[ix, iy][mask]
         if order_range and order_range[1] > order_range[0]:
             visible_order = (visible_order - order_range[0]) / (order_range[1] - order_range[0])
-        colors[:, 3] = 0.15 + 0.85 * np.clip(visible_order, 0.0, 1.0)
+        colors[:, 3] = 0.05 + 0.95 * np.clip(visible_order, 0.0, 1.0)
         directors = LineCollection(np.stack((centers - offsets, centers + offsets), axis=1),
                                    colors=colors, linewidths=1.0)
         ax.add_collection(directors)
@@ -294,11 +299,12 @@ class Exporter:
             )
         elif self.is_contour_field(field_name):
             values = self._load_for_contour(field_name, step)
+            backdrop_values = _mask_density_holes(values) if field_name == "density" else values
             c_field = contour_field if contour_field is not None else self.default_contour_field(field_name)
             contour_values = values if c_field == field_name else self._resolve_contour_values(c_field, step, values)
             eff_level = level if level is not None else self.default_level(c_field)
             FieldRenderer.contour(ax, self.xs, self.ys, self.x_edges, self.y_edges,
-                                   backdrop_values=values, contour_values=contour_values, level=eff_level,
+                                   backdrop_values=backdrop_values, contour_values=contour_values, level=eff_level,
                                    backdrop_cmap=(cmap or DEFAULT_SCALAR_CMAP) if backdrop else None, banded=banded,
                                    show_contour=show_contour, title=f"{field_name}  t={step}", colorbar=colorbar,
                                    value_range=self.data.display_range(field_name))
@@ -356,9 +362,11 @@ class Exporter:
                 frame_artists.extend((mesh, directors))
             else:
                 values = self._load_for_contour(field_name, step)
+                backdrop_values = _mask_density_holes(values) if field_name == "density" else values
                 contour_values = values if c_field == field_name else self._resolve_contour_values(c_field, step, values)
                 if backdrop:
-                    mesh = ax.pcolormesh(self.x_edges, self.y_edges, values.T, cmap=cmap_obj, shading="auto",
+                    mesh = ax.pcolormesh(self.x_edges, self.y_edges, backdrop_values.T,
+                                         cmap=cmap_obj, shading="auto",
                                          vmin=value_range[0] if value_range else None,
                                          vmax=value_range[1] if value_range else None)
                     frame_artists.append(mesh)

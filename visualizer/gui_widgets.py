@@ -12,13 +12,14 @@ ZoomBox = Tuple[float, float, float, float]
 
 
 class StepRangeControl(ttk.Frame):
-    """From / until / stride entries + a frame slider ("the player"), all
-    driven off one field's available steps. Calls `on_change` whenever the
-    selected frame changes so the owner can redraw a preview."""
+    """From / until / stride entries + a frame slider ("the player")."""
 
-    def __init__(self, master, on_change) -> None:
+    def __init__(self, master, on_change, on_slide) -> None:
         super().__init__(master)
         self._on_change = on_change
+        self._on_slide = on_slide
+        self._slider_job = None
+        self._last_slider_step: Optional[int] = None
         self.steps: List[int] = []
         self.selected_steps: List[int] = []
 
@@ -59,6 +60,9 @@ class StepRangeControl(ttk.Frame):
         return int(value) if value else None
 
     def _apply_range(self) -> None:
+        if self._slider_job is not None:
+            self.after_cancel(self._slider_job)
+            self._slider_job = None
         if not self.steps:
             self.selected_steps = []
         else:
@@ -72,11 +76,24 @@ class StepRangeControl(ttk.Frame):
         self.frame_slider.config(from_=0, to=max(0, n - 1))
         self.frame_index_var.set(0)
         self._update_label()
+        self._last_slider_step = self.current_step()
         self._on_change()
 
     def _on_slider(self, _value: str) -> None:
         self._update_label()
-        self._on_change()
+        if self.current_step() == self._last_slider_step:
+            return
+        if self._slider_job is not None:
+            self.after_cancel(self._slider_job)
+        self._slider_job = self.after(75, self._notify_slide)
+
+    def _notify_slide(self) -> None:
+        self._slider_job = None
+        step = self.current_step()
+        if step == self._last_slider_step:
+            return
+        self._last_slider_step = step
+        self._on_slide()
 
     def _update_label(self) -> None:
         step = self.current_step()

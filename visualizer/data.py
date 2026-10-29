@@ -168,6 +168,7 @@ class SimulationData:
     def _preload_fields(self) -> None:
         for field_name, steps in self.fields.items():
             low, high = np.inf, -np.inf
+            density_ranges = []
             for step in steps:
                 values = self.load_field(field_name, step)
                 if self.is_vector_field(field_name):
@@ -175,10 +176,16 @@ class SimulationData:
                 elif field_name == "levelset":
                     values = np.clip(-values, 0.0, None)
                 finite = values[np.isfinite(values)]
+                if field_name == "density":
+                    finite = finite[finite != 0.0]
                 if finite.size:
+                    if field_name == "density":
+                        density_ranges.append(np.percentile(finite, (5, 95)))
                     low = min(low, float(finite.min()))
                     high = max(high, float(finite.max()))
             if np.isfinite(low):
+                if density_ranges:
+                    low, high = np.median(np.asarray(density_ranges), axis=0)
                 if low == high:
                     high = low + 1.0
                 self.field_ranges[field_name] = low, high

@@ -107,12 +107,15 @@ class VisualizerTabMixin:
         preview_frame.pack(fill="both", expand=True)
         self.figure = Figure(figsize=(8, 6))
         self.figure.set_facecolor(PANEL_BG)
+        self._segmentation_preview_key = None
+        self._segmentation_axes = ()
         self.canvas = FigureCanvasTkAgg(self.figure, master=preview_frame)
         self.canvas.get_tk_widget().pack(fill="both", expand=True, padx=1, pady=1)
 
         player_frame = ttk.LabelFrame(parent, text="Player", padding=10)
         player_frame.pack(fill="x", pady=(12, 0))
-        self.range_control = StepRangeControl(player_frame, on_change=self._refresh_preview)
+        self.range_control = StepRangeControl(
+            player_frame, on_change=self._refresh_preview, on_slide=self._refresh_step_preview)
         self.range_control.pack(fill="x")
 
     # -- loading hook (called by VisualizerApp.load_simulation) -----------------
@@ -140,6 +143,8 @@ class VisualizerTabMixin:
         # previous selector was attached to. Kept as self._selector so it
         # isn't garbage-collected mid-use (RectangleSelector goes silently
         # unresponsive otherwise).
+        if self._selector is not None:
+            self._selector.disconnect_events()
         self._selector = RectangleSelector(
             self.ax, self._on_rectangle_select, useblit=True, button=[1],
             minspanx=5, minspany=5, spancoords="pixels", interactive=False,
@@ -148,7 +153,11 @@ class VisualizerTabMixin:
     def _show_segmentation(self) -> bool:
         return self.segmentation is not None and self.segmentation_visible_var.get()
 
-    def _refresh_preview(self) -> None:
+    def _refresh_step_preview(self) -> None:
+        if not self.evolution_var.get():
+            self._refresh_preview(preserve_segmentation=True)
+
+    def _refresh_preview(self, preserve_segmentation: bool = False) -> None:
         if self.exporter is None:
             return
         field_name = self.field_var.get()
@@ -156,9 +165,27 @@ class VisualizerTabMixin:
         if not field_name or step is None:
             return
         try:
-            self.figure.clf()
             crop = self.zoom_control.box() if self.zoom_control.enabled_var.get() else None
             is_velocity_grid = field_name == "velocity" and self.evolution_var.get()
+            show_seg = self._show_segmentation() and not is_velocity_grid
+            segmentation_key = (id(self.segmentation), self._segmentation_threshold()) if show_seg else None
+            reuse_segmentation = (
+                show_seg
+                and preserve_segmentation
+                and segmentation_key == self._segmentation_preview_key
+                and getattr(self, "ax", None) in self.figure.axes
+                and all(axis in self.figure.axes for axis in self._segmentation_axes)
+            )
+
+            if reuse_segmentation:
+                for axis in tuple(self.figure.axes):
+                    if axis is not self.ax and axis not in self._segmentation_axes:
+                        axis.remove()
+                self.ax.clear()
+            else:
+                self.figure.clf()
+                self._segmentation_preview_key = None
+                self._segmentation_axes = ()
 
             if is_velocity_grid:
                 # Small-multiples grid fills the whole figure with its own
@@ -175,10 +202,9 @@ class VisualizerTabMixin:
                 self.status_var.set(status)
                 return
 
-            show_seg = self._show_segmentation()
-            if show_seg:
+            if show_seg and not reuse_segmentation:
                 self.ax, self.seg_ax = self.figure.subplots(1, 2)
-            else:
+            elif not reuse_segmentation:
                 self.ax = self.figure.add_subplot(111)
                 self.seg_ax = None
 
@@ -200,14 +226,20 @@ class VisualizerTabMixin:
                         pass
                 status = f"Previewing {field_name}  step {step}"
 
-            if show_seg:
+            if show_seg and not reuse_segmentation:
+                axes_before_segmentation = set(self.figure.axes)
                 try:
                     draw_segmentation_evolution(self.seg_ax, self.segmentation,
-                                                 threshold=self._segmentation_threshold())
+                                                 threshold=segmentation_key[1])
                 except Exception as exc:
                     self.seg_ax.set_axis_off()
                     self.seg_ax.text(0.5, 0.5, f"segmentation preview failed:\n{exc}",
                                       ha="center", va="center", wrap=True, transform=self.seg_ax.transAxes)
+                self._segmentation_preview_key = segmentation_key
+                self._segmentation_axes = (
+                    self.seg_ax,
+                    *(axis for axis in self.figure.axes if axis not in axes_before_segmentation),
+                )
 
             self.figure.tight_layout()
             self._attach_selector()

@@ -91,11 +91,18 @@ def dice(a: np.ndarray, b: np.ndarray) -> float:
 
 # ── search ──────────────────────────────────────────────────────────────────
 
-def _score_step(seg_mask: np.ndarray, data: SimulationData, field: str, step: int, density_threshold: float,
-                 cache: Dict[int, float]) -> float:
+SimulationMaskCache = Dict[int, Tuple[np.ndarray, int]]
+
+
+def _score_step(seg_mask: np.ndarray, seg_count: int, data: SimulationData, field: str, step: int,
+                 density_threshold: float, cache: Dict[int, float], simulation_cache: SimulationMaskCache) -> float:
     if step not in cache:
-        sim_mask = simulation_inside_mask(data, field, step, density_threshold)
-        cache[step] = dice(seg_mask, sim_mask)
+        if step not in simulation_cache:
+            sim_mask = simulation_inside_mask(data, field, step, density_threshold)
+            simulation_cache[step] = sim_mask, int(sim_mask.sum())
+        sim_mask, sim_count = simulation_cache[step]
+        denom = seg_count + sim_count
+        cache[step] = 1.0 if denom == 0 else float(2 * np.logical_and(seg_mask, sim_mask).sum() / denom)
     return cache[step]
 
 
@@ -105,12 +112,18 @@ def exhaustive_search(seg_mask: np.ndarray, data: SimulationData, field: str,
     checked against, and still useful directly for a small simulation or a
     one-off run where the extra cost doesn't matter."""
     cache: Dict[int, float] = {}
+    simulation_cache: SimulationMaskCache = {}
+    seg_count = int(seg_mask.sum())
     steps = data.available_steps(field)
-    return [(s, _score_step(seg_mask, data, field, s, density_threshold, cache)) for s in steps]
+    return [
+        (s, _score_step(seg_mask, seg_count, data, field, s, density_threshold, cache, simulation_cache))
+        for s in steps
+    ]
 
 
 def coarse_to_fine_search(seg_mask: np.ndarray, data: SimulationData, field: str, density_threshold: float = 0.5,
-                           subsample: int = 10, neighborhood: int = 8) -> Tuple[int, float, Dict[int, float]]:
+                           subsample: int = 10, neighborhood: int = 8,
+                           simulation_cache: Optional[SimulationMaskCache] = None) -> Tuple[int, float, Dict[int, float]]:
     """Coarse sweep (every `subsample`-th step) to find an approximate best
     step, then a dense sweep over the `neighborhood`-index window around it
     (wide enough to fully cover the gap the coarse sweep skipped, plus
@@ -119,18 +132,20 @@ def coarse_to_fine_search(seg_mask: np.ndarray, data: SimulationData, field: str
     if not steps:
         return -1, 0.0, {}
     cache: Dict[int, float] = {}
+    simulation_cache = {} if simulation_cache is None else simulation_cache
+    seg_count = int(seg_mask.sum())
 
     coarse_idx = list(range(0, len(steps), max(1, subsample)))
     if coarse_idx[-1] != len(steps) - 1:
         coarse_idx.append(len(steps) - 1)
     for i in coarse_idx:
-        _score_step(seg_mask, data, field, steps[i], density_threshold, cache)
+        _score_step(seg_mask, seg_count, data, field, steps[i], density_threshold, cache, simulation_cache)
 
     best_coarse_step = max(coarse_idx, key=lambda i: cache[steps[i]])
     window = max(neighborhood, subsample)
     lo, hi = max(0, best_coarse_step - window), min(len(steps) - 1, best_coarse_step + window)
     for i in range(lo, hi + 1):
-        _score_step(seg_mask, data, field, steps[i], density_threshold, cache)
+        _score_step(seg_mask, seg_count, data, field, steps[i], density_threshold, cache, simulation_cache)
 
     best_step = max(cache, key=cache.get)
     return best_step, cache[best_step], cache
@@ -412,9 +427,11 @@ def process_folder(segmentation_dir: Path, sim: Union[Path, SimulationData], sou
     days_list = day_offsets(dates_list)
 
     results: List[FrameMatch] = []
+    simulation_cache: SimulationMaskCache = {}
     for i, (seg_path, source_path, frame_date, day) in enumerate(zip(seg_files, source_files, dates_list, days_list)):
         seg_mask = load_segmentation_mask(seg_path, nx, ny)
-        step, score, evaluated = coarse_to_fine_search(seg_mask, data, field, density_threshold, subsample, neighborhood)
+        step, score, evaluated = coarse_to_fine_search(
+            seg_mask, data, field, density_threshold, subsample, neighborhood, simulation_cache)
         neighborhood_width_count = sum(abs(value - score) <= tolerance for value in evaluated.values())
         match = FrameMatch(segmentation=seg_path, source=source_path, step=step, dice=score,
                             date=frame_date, day=day,
